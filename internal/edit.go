@@ -49,7 +49,7 @@ func ShouldAddLocation(scanner *bufio.Scanner, location string) (bool, error) {
 // On close, it strips the header and returns the content as a string,
 // or an error if nothing was changed.
 func RunEditor(header string) (string, error) {
-	tempFile, err := os.CreateTemp("", "blog*.txt")
+	tempFile, err := os.CreateTemp("", "blog*.md")
 	if err != nil {
 		return "", err
 	}
