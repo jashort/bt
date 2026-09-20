@@ -107,8 +107,8 @@ func DiscoverLegacyFiles(dataDir string) (files []legacyFile, skipped []string, 
 
 // ParseLegacyDayFile splits a legacy day file into entries.
 //
-// Only "## <timestamp>" lines that parse with timestampLayout open a new
-// entry; other lines starting with "## " are body text and pass through
+// Only "## <timestamp>" lines that parse with one of headerLayouts open a
+// new entry; other lines starting with "## " are body text and pass through
 // unchanged. There must be no non-blank content before the first entry
 // header, or an error naming the file and line is returned. Each entry's
 // location is the last "Location: " line in its segment; any earlier ones
@@ -156,6 +156,15 @@ func ParseLegacyDayFile(path string, day time.Time, content string) ([]legacyEnt
 	return entries, nil
 }
 
+// headerLayouts lists the header formats historical versions have written:
+// the current "Monday 2006-01-02 3:04 PM MST" and the early slash-date
+// "Monday 01/02/2006 3:04 PM MST" (which also appears with a zero-padded
+// hour, e.g. "07:45"; Go's parser accepts that under the "3" layout).
+var headerLayouts = []string{
+	timestampLayout,
+	"Monday 01/02/2006 3:04 PM MST",
+}
+
 // parseHeaderLine returns the timestamp of a "## <timestamp>" entry header
 // line, or an error if the line is not a header (including "## " lines that
 // are ordinary body text).
@@ -163,7 +172,13 @@ func parseHeaderLine(line string) (time.Time, error) {
 	if !strings.HasPrefix(line, "## ") {
 		return time.Time{}, errors.New("not an entry header")
 	}
-	return time.Parse(timestampLayout, strings.TrimSpace(strings.TrimPrefix(line, "## ")))
+	text := strings.TrimSpace(strings.TrimPrefix(line, "## "))
+	for _, layout := range headerLayouts {
+		if ts, err := time.Parse(layout, text); err == nil {
+			return ts, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unparsable timestamp %q", text)
 }
 
 // parseHeaderlessEntry treats the entire content as one entry stamped at noon

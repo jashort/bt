@@ -118,12 +118,13 @@ disjoint from the current `YYYY/MM/DD/*.md` layout, so migrated files are
 never re-processed.
 
 **Headered files** (`internal.ParseLegacyDayFile`). Only `## ` lines whose
-remainder parses with `timestampLayout` open a new entry; other lines
-starting with `## ` (e.g. plain Markdown headings) are body text and pass
-through unchanged. No non-blank content may precede the first entry header.
-Location carry-down reproduces the old semantics: an entry with a
-`Location: ` line keeps it; an entry without one inherits the most recent
-earlier location in the file.
+remainder parses with one of `headerLayouts` open a new entry — the current
+`Monday 2006-01-02 3:04 PM MST` and the early slash-date
+`Monday 01/02/2006 3:04 PM MST` — other lines starting with `## ` (e.g.
+plain Markdown headings) are body text and pass through unchanged. No
+non-blank content may precede the first entry header. Location carry-down
+reproduces the old semantics: an entry with a `Location: ` line keeps it; an
+entry without one inherits the most recent earlier location in the file.
 
 **Headerless files.** Old files sometimes have no entry headers at all;
 entry boundaries there are implied only by prose and cannot be parsed, so the

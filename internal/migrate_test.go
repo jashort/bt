@@ -410,9 +410,46 @@ func fmtEpoch(ts time.Time) string {
 // mustParseHeader parses a header timestamp exactly the way the migrator does.
 func mustParseHeader(t *testing.T, header string) time.Time {
 	t.Helper()
-	ts, err := time.Parse(timestampLayout, header)
+	ts, err := parseHeaderLine("## " + header)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return ts
+}
+
+// The earliest files use slash dates and sometimes a zero-padded hour.
+func TestParseLegacyDayFileSlashDateHeaders(t *testing.T) {
+	content := "\n## Saturday 06/28/2025 07:45 AM CDT\n\nLocation: Bull Shoals, AR\nSlept... not bad I think? So that's kinda cool.\n"
+	entries, err := ParseLegacyDayFile("2025/2025-06-28.txt", time.Time{}, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.HeaderTime.Format("2006-01-02 3:04 PM") != "2025-06-28 7:45 AM" {
+		t.Errorf("header time = %q, want 2025-06-28 7:45 AM", e.HeaderTime)
+	}
+	if e.Location != "Bull Shoals, AR" {
+		t.Errorf("location = %q, want Bull Shoals, AR", e.Location)
+	}
+	if e.Body != "Slept... not bad I think? So that's kinda cool." {
+		t.Errorf("body = %q", e.Body)
+	}
+}
+
+// Mixed header formats within one file must all parse.
+func TestParseLegacyDayFileMixedHeaderFormats(t *testing.T) {
+	content := "\n## Saturday 06/28/2025 7:45 AM CDT\n\nFirst\n\n## Saturday 2025-06-28 11:13 AM CDT\n\nSecond\n"
+	entries, err := ParseLegacyDayFile("f", time.Time{}, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	if entries[0].HeaderTime.Format("2006-01-02") != "2025-06-28" || entries[1].HeaderTime.Format("2006-01-02") != "2025-06-28" {
+		t.Errorf("header times = %q, %q", entries[0].HeaderTime, entries[1].HeaderTime)
+	}
 }
