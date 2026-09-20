@@ -28,9 +28,11 @@ type legacyFile struct {
 
 // legacyEntry is one entry of a legacy day file.
 type legacyEntry struct {
-	HeaderTime time.Time
-	Body       string
-	Raw        bool // Headerless file: Body is the whole raw file content and no header is prepended
+	HeaderTime     time.Time
+	Location       string
+	HasOwnLocation bool // A "Location: " line was present in this entry's own content
+	Body           string
+	Raw            bool // Headerless file: Body is the whole raw file content and no header is prepended
 }
 
 // PlannedEntry is one legacy entry with its migration plan resolved.
@@ -40,7 +42,9 @@ type PlannedEntry struct {
 	Content         string // Exact bytes to write to DestPath
 	ExistsIdentical bool   // DestPath already contains exactly Content
 	HeaderTime      time.Time
-	Raw             bool // File is moved as-is, without splitting or a prepended header
+	Location        string
+	LocationSource  string // "own", "carried", or "" for raw entries
+	Raw             bool   // File is moved as-is, without splitting or a prepended header
 }
 
 // FileGroup pairs a legacy source file with its planned entries.
@@ -100,17 +104,22 @@ func DiscoverLegacyFiles(dataDir string) (files []legacyFile, skipped []string, 
 }
 
 // SplitLegacyEntries splits a legacy day file into entries using two
-// deterministic rules; nothing is inferred and no data is synthesized.
+// deterministic rules.
 //
 // If the file contains timestamp headers (any format in headerLayouts), it is
-// split at those lines. Each entry's body is the content below its header as
-// it appears in the file — Location lines stay exactly where they are, and
-// nothing is carried down between entries. Content before the first header is
-// kept at the top of the first entry's body.
+// split at those lines and each header is normalized later by
+// buildEntryContent. Because the file is being split, the old "location only
+// when it differs" semantics are restored: an entry's location is the last
+// "Location: " line in its own content (or, before the first header, the most
+// recent pre-header one), and an entry without any inherits the most recent
+// earlier location in the file. The remaining content below the header is
+// kept as it appeared; content before the first header is kept at the top of
+// the first entry's body.
 //
 // If the file contains no timestamp headers, it cannot be split safely, so a
 // single Raw entry is returned carrying the file content as-is; it is moved
-// unmodified and named for noon on the file's date.
+// unmodified and named for noon on the file's date, with no location
+// handling of any kind.
 func SplitLegacyEntries(day time.Time, content string) ([]legacyEntry, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, nil // Empty file: nothing to migrate
@@ -140,17 +149,61 @@ func SplitLegacyEntries(day time.Time, content string) ([]legacyEntry, error) {
 		}
 		segment := lines[start+1 : end]
 		if h == 0 && headerIdx[0] > 0 {
-			// Keep pre-header content at the top of the first entry, as-is.
+			// Pre-header content (including any pre-header "Location: " line,
+			// which then simply becomes this entry's own location) is part of
+			// the first entry.
 			pre := append([]string{}, lines[:headerIdx[0]]...)
 			segment = append(pre, segment...)
 		}
+		location, hasOwn, bodyLines := extractLocation(segment)
 		ts, _ := parseHeaderLine(lines[start])
 		entries = append(entries, legacyEntry{
-			HeaderTime: ts,
-			Body:       strings.TrimSpace(strings.Join(segment, "\n")),
+			HeaderTime:     ts,
+			Location:       location,
+			HasOwnLocation: hasOwn,
+			Body:           strings.TrimSpace(strings.Join(bodyLines, "\n")),
 		})
 	}
+	carryDownLocations(entries)
 	return entries, nil
+}
+
+// locationPrefix is how location lines start, matching the historical writer.
+const locationPrefix = "Location: "
+
+// extractLocation pulls the last "Location: " line out of an entry's content
+// (the old most-recent-wins semantics); any earlier location lines stay in
+// the body.
+func extractLocation(segment []string) (location string, hasOwn bool, body []string) {
+	lastIdx := -1
+	for i, line := range segment {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, locationPrefix) {
+			location = strings.TrimSpace(t[len(locationPrefix):])
+			hasOwn = true
+			lastIdx = i
+		}
+	}
+	body = make([]string, 0, len(segment))
+	for i, line := range segment {
+		if i == lastIdx {
+			continue
+		}
+		body = append(body, line)
+	}
+	return location, hasOwn, body
+}
+
+// carryDownLocations fills in entries without their own "Location: " line
+// with the most recent location seen earlier in the file.
+func carryDownLocations(entries []legacyEntry) {
+	var last string
+	for i := range entries {
+		if entries[i].HasOwnLocation {
+			last = entries[i].Location
+			continue
+		}
+		entries[i].Location = last
+	}
 }
 
 // headerLayouts lists the header formats historical versions have written.
@@ -198,14 +251,18 @@ func noonLocal(day time.Time) time.Time {
 }
 
 // buildEntryContent renders a legacy entry in the per-entry file format: a
-// normalized header followed by the content as it appeared below the original
-// header. Raw (headerless) entries are moved as-is, byte-for-byte, with no
-// header prepended.
+// normalized header, the entry's location line, then the content as it
+// appeared below the original header. Raw (headerless) entries are moved
+// as-is, byte-for-byte, with no header or location line added.
 func buildEntryContent(e legacyEntry) string {
 	if e.Raw {
 		return e.Body
 	}
-	return TimestampHeader(e.HeaderTime) + e.Body + "\n"
+	var b strings.Builder
+	b.WriteString(TimestampHeader(e.HeaderTime))
+	b.WriteString(fmt.Sprintf("Location: %s\n\n", e.Location))
+	b.WriteString(strings.TrimSpace(e.Body) + "\n")
+	return b.String()
 }
 
 // PlanMigration scans the data dir, splits every legacy file, and validates
@@ -238,12 +295,21 @@ func PlanMigration(dataDir string) (*MigrationPlan, error) {
 				return nil, fmt.Errorf("%s: %s maps to the same destination as %s", f.Path, dest, prev)
 			}
 			claimed[dest] = f.Path
+			source := "" // Raw entries get no location handling.
+			if !e.Raw {
+				source = "carried"
+				if e.HasOwnLocation {
+					source = "own"
+				}
+			}
 			pe := &PlannedEntry{
-				SourceFile: f.Path,
-				DestPath:   dest,
-				Content:    buildEntryContent(e),
-				HeaderTime: e.HeaderTime,
-				Raw:        e.Raw,
+				SourceFile:     f.Path,
+				DestPath:       dest,
+				Content:        buildEntryContent(e),
+				HeaderTime:     e.HeaderTime,
+				Location:       e.Location,
+				LocationSource: source,
+				Raw:            e.Raw,
 			}
 			if existing, err := os.ReadFile(dest); err == nil {
 				if !bytes.Equal(existing, []byte(pe.Content)) {

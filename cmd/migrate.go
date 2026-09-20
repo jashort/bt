@@ -23,6 +23,8 @@ func (c *MigrateCmd) Run(ctx *Context) error {
 			extra := ""
 			if e.Raw {
 				extra = " (moved as-is)"
+			} else {
+				extra = fmt.Sprintf(" (location: %s)", e.LocationSource)
 			}
 			fmt.Printf("  %s -> %s%s\n", e.HeaderTime.Format("3:04 PM"), relPath(e.DestPath), extra)
 		}

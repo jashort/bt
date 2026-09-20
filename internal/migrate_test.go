@@ -37,15 +37,58 @@ func TestSplitLegacyEntriesHeadered(t *testing.T) {
 	if first.HeaderTime.Format("2006-01-02 3:04 PM") != "2024-01-01 9:19 AM" {
 		t.Errorf("first header time = %q", first.HeaderTime)
 	}
-	if first.Body != "Location: Chicago, IL\n\nFirst entry body" {
+	if !first.HasOwnLocation || first.Location != "Chicago, IL" {
+		t.Errorf("first location = %q own=%v, want Chicago, IL own=true", first.Location, first.HasOwnLocation)
+	}
+	if first.Body != "First entry body" {
 		t.Errorf("first body = %q", first.Body)
 	}
-	// Nothing is carried down: the second entry is exactly its own content.
+	// Split files carry the location down to entries without their own.
+	if second.HasOwnLocation {
+		t.Error("second entry should not have its own location")
+	}
+	if second.Location != "Chicago, IL" {
+		t.Errorf("second location = %q, want Chicago, IL carried down", second.Location)
+	}
 	if second.Body != "Second entry body." {
-		t.Errorf("second body = %q, want content as-is with no invented location", second.Body)
+		t.Errorf("second body = %q", second.Body)
 	}
 	if second.Raw || first.Raw {
 		t.Error("headered entries must not be raw")
+	}
+}
+
+// The most recent location wins for later entries.
+func TestSplitLegacyEntriesCarryDownChain(t *testing.T) {
+	data := "## Monday 2024-01-01 9:00 AM CST\nLocation: Chicago, IL\n\nA\n\n## Monday 2024-01-01 10:00 AM CST\n\nB\n\n## Monday 2024-01-01 11:00 AM CST\nLocation: Omaha, NE\n\nC\n\n## Monday 2024-01-01 12:00 PM CST\n\nD\n"
+	entries, err := SplitLegacyEntries(time.Time{}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Chicago, IL", "Chicago, IL", "Omaha, NE", "Omaha, NE"}
+	for i, w := range want {
+		if entries[i].Location != w {
+			t.Errorf("entries[%d].Location = %q, want %q", i, entries[i].Location, w)
+		}
+	}
+}
+
+// If one entry's content contains several location lines, the last one wins
+// and earlier ones stay in the body.
+func TestSplitLegacyEntriesLastLocationWins(t *testing.T) {
+	data := "## Monday 2024-01-01 9:00 AM CST\nLocation: First place\n\nText\nLocation: Second place\n\nMore text\n"
+	entries, err := SplitLegacyEntries(time.Time{}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries[0].Location != "Second place" {
+		t.Errorf("location = %q, want Second place", entries[0].Location)
+	}
+	if !strings.Contains(entries[0].Body, "Location: First place") {
+		t.Errorf("body %q should retain the earlier location line", entries[0].Body)
+	}
+	if strings.Contains(entries[0].Body, "Second place") {
+		t.Errorf("promoted location should be removed from body %q", entries[0].Body)
 	}
 }
 
@@ -61,9 +104,11 @@ func TestSplitLegacyEntriesSlashDateHeaders(t *testing.T) {
 	if entries[0].HeaderTime.Format("2006-01-02 3:04 PM") != "2025-06-28 7:45 AM" {
 		t.Errorf("header time = %q, want 2025-06-28 7:45 AM", entries[0].HeaderTime)
 	}
-	want := "Location: Bull Shoals, AR\nSlept... not bad I think? So that's kinda cool."
-	if entries[0].Body != want {
-		t.Errorf("body = %q, want %q", entries[0].Body, want)
+	if entries[0].Location != "Bull Shoals, AR" {
+		t.Errorf("location = %q, want Bull Shoals, AR", entries[0].Location)
+	}
+	if entries[0].Body != "Slept... not bad I think? So that's kinda cool." {
+		t.Errorf("body = %q", entries[0].Body)
 	}
 }
 
@@ -85,8 +130,8 @@ func TestSplitLegacyEntriesMixedHeaderFormats(t *testing.T) {
 
 // Headers without a timezone must parse too; this is the exact shape of a
 // real file (pre-header location + zone-less slash-date header). The
-// pre-header location is content and stays at the top of the first entry's
-// body, where it lands directly under the normalized header.
+// pre-header location is inside the first entry's content, so it simply
+// becomes that entry's own location.
 func TestSplitLegacyEntriesZonelessHeader(t *testing.T) {
 	content := "Location: Flight DL2014, RDU > MSP\n\n## Tuesday 03/14/2023 01:25 PM\nGot up a touch early today\n"
 	entries, err := SplitLegacyEntries(time.Date(2023, 3, 14, 0, 0, 0, 0, time.Local), content)
@@ -103,7 +148,10 @@ func TestSplitLegacyEntriesZonelessHeader(t *testing.T) {
 	if e.HeaderTime.Location() != time.Local {
 		t.Errorf("zone-less header should resolve to the local zone, got %v", e.HeaderTime.Location())
 	}
-	if e.Body != "Location: Flight DL2014, RDU > MSP\n\nGot up a touch early today" {
+	if e.Location != "Flight DL2014, RDU > MSP" || !e.HasOwnLocation {
+		t.Errorf("location = %q own=%v, want Flight DL2014, RDU > MSP own=true", e.Location, e.HasOwnLocation)
+	}
+	if e.Body != "Got up a touch early today" {
 		t.Errorf("body = %q", e.Body)
 	}
 }
@@ -199,7 +247,7 @@ func TestSplitLegacyEntriesEmpty(t *testing.T) {
 func TestBuildEntryContent(t *testing.T) {
 	tz := time.FixedZone("CST", -6*60*60)
 	ts := time.Date(2024, 1, 1, 9, 19, 0, 0, tz)
-	got := buildEntryContent(legacyEntry{HeaderTime: ts, Body: "Location: Chicago, IL\n\nBody text"})
+	got := buildEntryContent(legacyEntry{HeaderTime: ts, Location: "Chicago, IL", Body: "Body text"})
 	want := "## Monday 2024-01-01 9:19 AM CST\nLocation: Chicago, IL\n\nBody text\n"
 	if got != want {
 		t.Errorf("buildEntryContent() = %q, want %q", got, want)
@@ -207,7 +255,7 @@ func TestBuildEntryContent(t *testing.T) {
 
 	raw := "Whatever the file contained\n\nas-is.\n"
 	if buildEntryContent(legacyEntry{Raw: true, Body: raw}) != raw {
-		t.Error("raw entries must be moved as-is")
+		t.Error("raw entries must be moved as-is with no header or location line added")
 	}
 }
 
@@ -238,10 +286,13 @@ func TestPlanMigrationFullRun(t *testing.T) {
 	if g.Entries[0].Content != want1 {
 		t.Errorf("content[0] = %q, want %q", g.Entries[0].Content, want1)
 	}
-	// The second entry gets no invented location.
-	want2 := "## Monday 2024-01-01 11:13 AM CST\nSecond entry body.\n"
+	// The second entry inherits the carried-down location.
+	want2 := "## Monday 2024-01-01 11:13 AM CST\nLocation: Chicago, IL\n\nSecond entry body.\n"
 	if g.Entries[1].Content != want2 {
 		t.Errorf("content[1] = %q, want %q", g.Entries[1].Content, want2)
+	}
+	if g.Entries[0].LocationSource != "own" || g.Entries[1].LocationSource != "carried" {
+		t.Errorf("location sources = %q, %q; want own, carried", g.Entries[0].LocationSource, g.Entries[1].LocationSource)
 	}
 
 	// Plan must not write anything.

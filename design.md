@@ -125,12 +125,16 @@ only — nothing is inferred and no data is synthesized:
    `Monday 2006-01-02 3:04 PM MST`, the early slash-date
    `Monday 01/02/2006 3:04 PM MST`, and zone-less variants of both): the file
    is split at those lines, and each header is normalized to the current
-   format (`## Sunday 2026-09-20 9:46 AM PDT`). The content below each header
-   is kept exactly as it appeared — `Location:` lines stay where they are and
-   are never carried down to entries that lack them. Lines starting with
-   `## ` that are not timestamp headers are body text and pass through
-   unchanged, and content before the first header is kept at the top of the
-   first entry's body.
+   format (`## Sunday 2026-09-20 9:46 AM PDT`). Because the file is being
+   split, the old "location only when it differs" semantics are restored:
+   an entry's location is the last `Location: ` line in its own content (a
+   pre-header `Location: ` line belongs to the first entry), and an entry
+   without one inherits the most recent earlier location in the file. The
+   location line is re-emitted right under the normalized header, followed by
+   the remaining content as it appeared. Lines starting with `## ` that are
+   not timestamp headers are body text and pass through unchanged, and other
+   content before the first header is kept at the top of the first entry's
+   body.
 2. **No timestamp headers**: the file cannot be split safely, so it is moved
    as-is (byte-for-byte, no header prepended) to
    `<data-dir>/YYYY/MM/DD/<epoch>.md`, where the epoch is **noon local time
