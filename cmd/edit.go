@@ -17,7 +17,13 @@ func (l *EditCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	targetFile := internal.DestinationFile(ctx.DataDir, timestamp)
+	targetFile, err := internal.LatestEntryFile(ctx.DataDir, timestamp)
+	if err != nil {
+		return err
+	}
+	if targetFile == "" {
+		targetFile = internal.DestinationFile(ctx.DataDir, timestamp)
+	}
 	cmd := exec.Command("nvim", targetFile, "+star", "+")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

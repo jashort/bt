@@ -19,7 +19,14 @@ func (l *ViewCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	dat, err := os.ReadFile(internal.DestinationFile(ctx.DataDir, timestamp))
+	targetFile, err := internal.LatestEntryFile(ctx.DataDir, timestamp)
+	if err != nil {
+		return err
+	}
+	if targetFile == "" {
+		return fmt.Errorf("No entries found for %s", timestamp.Format("2006-01-02"))
+	}
+	dat, err := os.ReadFile(targetFile)
 	if err != nil {
 		return err
 	}

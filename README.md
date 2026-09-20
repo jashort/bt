@@ -12,7 +12,7 @@ Other things happened... But location is only added if it's different than the l
 entry in the file.
 ```
 
-Files are stored in `~/data/Blog/YYYY/YYYY-MM-DD.txt` (configurable)
+Files are stored in `~/data/Blog/YYYY/MM/DD/<seconds since unix epoch>.md` (configurable)
 Entries are edited with `nvim`
 
 ## Usage

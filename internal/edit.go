@@ -2,11 +2,13 @@ package internal
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -82,6 +84,35 @@ func RunEditor(header string) (string, error) {
 	return strings.TrimSpace(strings.TrimPrefix(string(dat), header)), nil
 }
 
+// DestinationFile returns the path a new entry made at the given time should be saved to.
 func DestinationFile(baseDir string, at time.Time) string {
-	return path.Join(baseDir, at.Format("2006"), at.Format("2006-01-02")+".txt")
+	dayDir := path.Join(baseDir, at.Format("2006"), at.Format("01"), at.Format("02"))
+	return path.Join(dayDir, fmt.Sprintf("%d.md", at.Unix()))
+}
+
+// LatestEntryFile returns the path of the most recent entry file saved on the
+// day of the given timestamp, or "" if there is no entry that day.
+func LatestEntryFile(baseDir string, at time.Time) (string, error) {
+	dayDir := path.Join(baseDir, at.Format("2006"), at.Format("01"), at.Format("02"))
+	entries, err := os.ReadDir(dayDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	latest := ""
+	var latestUnix int64 = -1
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSuffix(e.Name(), ".md"), 10, 64)
+		if err != nil || n <= latestUnix {
+			continue
+		}
+		latestUnix = n
+		latest = path.Join(dayDir, e.Name())
+	}
+	return latest, nil
 }
