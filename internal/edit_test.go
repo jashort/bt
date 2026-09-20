@@ -74,3 +74,52 @@ func TestLatestEntryFile(t *testing.T) {
 		t.Errorf("LatestEntryFile() = %v, %v; want \"\", nil for empty dir", got, err)
 	}
 }
+
+// EntryFiles lists a day's entries sorted by the timestamp in the header row.
+func TestEntryFiles(t *testing.T) {
+	root := t.TempDir()
+	dayDir := filepath.Join(root, "2026", "09", "20")
+	if err := os.MkdirAll(dayDir, os.ModePerm); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"1789863000.md": "## Sunday 2026-09-20 10:00 AM PDT\n\nLater entry\n",
+		"1789900000.md": "## Sunday 2026-09-20 8:12 AM PDT\n\nEarlier entry\n",
+		"1789999999.md": "no header here\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dayDir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := EntryFiles(t.TempDir(), time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC))
+	if err != nil || len(got) != 0 {
+		t.Errorf("EntryFiles() = %v, %v; want none for empty dir", got, err)
+	}
+
+	got, err = EntryFiles(root, time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOrder := []string{"1789900000.md", "1789863000.md", "1789999999.md"}
+	if len(got) != len(wantOrder) {
+		t.Fatalf("EntryFiles() returned %d files, want %d", len(got), len(wantOrder))
+	}
+	for i, want := range wantOrder {
+		if base := filepath.Base(got[i].Path); base != want {
+			t.Errorf("EntryFiles()[%d] = %v, want %v", i, base, want)
+		}
+	}
+}
+
+// parseHeaderTimestamp reads the timestamp out of the header row.
+func TestParseHeaderTimestamp(t *testing.T) {
+	got, err := parseHeaderTimestamp("## Sunday 2026-09-20 8:12 AM PDT\n\nSome things happened...\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formatted := got.Format("2006-01-02 3:04 PM"); formatted != "2026-09-20 8:12 AM" {
+		t.Errorf("parseHeaderTimestamp() = %v, want 2026-09-20 8:12 AM", formatted)
+	}
+}

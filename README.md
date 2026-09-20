@@ -26,7 +26,7 @@ bt --location "Somewhere Else"
 # Set the timestamp to yesterday's date at 3:00 PM in the local (system) timezone
 bt --at "yesterday 3:00 PM"
 
-# Print the contents of yesterday's file
+# Print all of yesterday's entries
 bt view --at "yesterday"  
 
 # Edit the entry for a specific date

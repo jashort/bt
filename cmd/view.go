@@ -19,20 +19,22 @@ func (l *ViewCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	targetFile, err := internal.LatestEntryFile(ctx.DataDir, timestamp)
+	files, err := internal.EntryFiles(ctx.DataDir, timestamp)
 	if err != nil {
 		return err
 	}
-	if targetFile == "" {
+	if len(files) == 0 {
 		return fmt.Errorf("No entries found for %s", timestamp.Format("2006-01-02"))
-	}
-	dat, err := os.ReadFile(targetFile)
-	if err != nil {
-		return err
 	}
 
 	wrapper := wrap.NewWrapper()
-	fmt.Print(wrapper.Wrap(string(dat), getTerminalWidth()))
+	for _, f := range files {
+		dat, err := os.ReadFile(f.Path)
+		if err != nil {
+			return err
+		}
+		fmt.Print(wrapper.Wrap(string(dat), getTerminalWidth()))
+	}
 	return nil
 }
 
