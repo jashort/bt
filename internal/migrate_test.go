@@ -20,12 +20,12 @@ First entry body
 
 ## Monday 2024-01-01 11:13 AM CST
 
-Second entry body, location carried over.
+Second entry body.
 `
 
-func TestParseLegacyDayFileHeadered(t *testing.T) {
+func TestSplitLegacyEntriesHeadered(t *testing.T) {
 	day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.FixedZone("CST", -6*60*60))
-	entries, err := ParseLegacyDayFile("2024/2024-01-01.txt", day, twoEntryDay)
+	entries, err := SplitLegacyEntries(day, twoEntryDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,76 +34,62 @@ func TestParseLegacyDayFileHeadered(t *testing.T) {
 	}
 	first, second := entries[0], entries[1]
 
-	if got := first.HeaderTime.Format("2006-01-02 3:04 PM"); got != "2024-01-01 9:19 AM" {
-		t.Errorf("first header time = %q", got)
+	if first.HeaderTime.Format("2006-01-02 3:04 PM") != "2024-01-01 9:19 AM" {
+		t.Errorf("first header time = %q", first.HeaderTime)
 	}
-	if !first.HasOwnLocation || first.Location != "Chicago, IL" {
-		t.Errorf("first location = %q own=%v, want Chicago, IL own=true", first.Location, first.HasOwnLocation)
-	}
-	if first.Body != "First entry body" {
+	if first.Body != "Location: Chicago, IL\n\nFirst entry body" {
 		t.Errorf("first body = %q", first.Body)
 	}
-
-	if second.HasOwnLocation {
-		t.Error("second entry should not have its own location yet")
+	// Nothing is carried down: the second entry is exactly its own content.
+	if second.Body != "Second entry body." {
+		t.Errorf("second body = %q, want content as-is with no invented location", second.Body)
 	}
-	if second.Body != "Second entry body, location carried over." {
-		t.Errorf("second body = %q", second.Body)
+	if second.Raw || first.Raw {
+		t.Error("headered entries must not be raw")
 	}
 }
 
-func TestCarryDownLocations(t *testing.T) {
-	entries, err := ParseLegacyDayFile("f", time.Time{}, twoEntryDay)
+func TestSplitLegacyEntriesSlashDateHeaders(t *testing.T) {
+	content := "\n## Saturday 06/28/2025 07:45 AM CDT\nLocation: Bull Shoals, AR\nSlept... not bad I think? So that's kinda cool.\n"
+	entries, err := SplitLegacyEntries(time.Time{}, content)
 	if err != nil {
 		t.Fatal(err)
 	}
-	carryDownLocations(entries)
-	if entries[1].Location != "Chicago, IL" {
-		t.Errorf("carried location = %q, want Chicago, IL", entries[1].Location)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
 	}
+	if entries[0].HeaderTime.Format("2006-01-02 3:04 PM") != "2025-06-28 7:45 AM" {
+		t.Errorf("header time = %q, want 2025-06-28 7:45 AM", entries[0].HeaderTime)
+	}
+	want := "Location: Bull Shoals, AR\nSlept... not bad I think? So that's kinda cool."
+	if entries[0].Body != want {
+		t.Errorf("body = %q, want %q", entries[0].Body, want)
+	}
+}
 
-	// The most recent location wins for later entries.
-	data := "## Monday 2024-01-01 9:00 AM CST\nLocation: Chicago, IL\n\nA\n\n## Monday 2024-01-01 10:00 AM CST\n\nB\n\n## Monday 2024-01-01 11:00 AM CST\nLocation: Omaha, NE\n\nC\n\n## Monday 2024-01-01 12:00 PM CST\n\nD\n"
-	entries, err = ParseLegacyDayFile("f", time.Time{}, data)
+func TestSplitLegacyEntriesMixedHeaderFormats(t *testing.T) {
+	content := "\n## Saturday 06/28/2025 7:45 AM CDT\n\nFirst\n\n## Saturday 2025-06-28 11:13 AM CDT\n\nSecond\n"
+	entries, err := SplitLegacyEntries(time.Time{}, content)
 	if err != nil {
 		t.Fatal(err)
 	}
-	carryDownLocations(entries)
-	want := []string{"Chicago, IL", "Chicago, IL", "Omaha, NE", "Omaha, NE"}
-	for i, w := range want {
-		if entries[i].Location != w {
-			t.Errorf("entries[%d].Location = %q, want %q", i, entries[i].Location, w)
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	for i, e := range entries {
+		if e.HeaderTime.Format("2006-01-02") != "2025-06-28" {
+			t.Errorf("entries[%d] header time = %q", i, e.HeaderTime)
 		}
 	}
 }
 
-func TestParseLegacyDayFileMalformed(t *testing.T) {
-	cases := []struct {
-		name    string
-		content string
-		wantErr string
-	}{
-		{"content before first header", "loose text\n\n## Monday 2024-01-01 9:00 AM CST\n\nbody\n", "content before first entry header"},
-		{"non-header hash line before first header", "## Just a heading\n## Monday 2024-01-01 9:00 AM CST\n\nbody\n", "content before first entry header"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseLegacyDayFile("2024/2024-01-01.txt", time.Time{}, tc.content)
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("err = %v, want it to contain %q", err, tc.wantErr)
-			}
-			if !strings.Contains(err.Error(), "2024/2024-01-01.txt:") {
-				t.Errorf("error %q should name the file and line", err)
-			}
-		})
-	}
-}
-
 // Headers without a timezone must parse too; this is the exact shape of a
-// real failing file (pre-header location + zone-less slash-date header).
-func TestParseLegacyDayFileZonelessHeader(t *testing.T) {
+// real file (pre-header location + zone-less slash-date header). The
+// pre-header location is content and stays at the top of the first entry's
+// body, where it lands directly under the normalized header.
+func TestSplitLegacyEntriesZonelessHeader(t *testing.T) {
 	content := "Location: Flight DL2014, RDU > MSP\n\n## Tuesday 03/14/2023 01:25 PM\nGot up a touch early today\n"
-	entries, err := ParseLegacyDayFile("2023/2023-03-14.txt", time.Time{}, content)
+	entries, err := SplitLegacyEntries(time.Date(2023, 3, 14, 0, 0, 0, 0, time.Local), content)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,17 +103,13 @@ func TestParseLegacyDayFileZonelessHeader(t *testing.T) {
 	if e.HeaderTime.Location() != time.Local {
 		t.Errorf("zone-less header should resolve to the local zone, got %v", e.HeaderTime.Location())
 	}
-	if e.Location != "Flight DL2014, RDU > MSP" {
-		t.Errorf("location = %q", e.Location)
-	}
-	if e.Body != "Got up a touch early today" {
+	if e.Body != "Location: Flight DL2014, RDU > MSP\n\nGot up a touch early today" {
 		t.Errorf("body = %q", e.Body)
 	}
 }
 
-func TestParseLegacyDayFileZonelessISOHeader(t *testing.T) {
-	content := "\n## Tuesday 2023-03-14 1:25 PM\nBody only\n"
-	entries, err := ParseLegacyDayFile("f", time.Time{}, content)
+func TestSplitLegacyEntriesZonelessISOHeader(t *testing.T) {
+	entries, err := SplitLegacyEntries(time.Time{}, "\n## Tuesday 2023-03-14 1:25 PM\nBody only\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,83 +118,11 @@ func TestParseLegacyDayFileZonelessISOHeader(t *testing.T) {
 	}
 }
 
-// A "## " line before the first entry header that is not a valid header is
-// still malformed.
-func TestParseLegacyDayFilePreHeaderLocation(t *testing.T) {
-	content := "Location: Bull Shoals, AR\n\n## Saturday 06/28/2025 07:45 AM CDT\n\nSlept... not bad I think? So that's kinda cool.\n"
-	entries, err := ParseLegacyDayFile("2025/2025-06-28.txt", time.Time{}, content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("got %d entries, want 1", len(entries))
-	}
-	e := entries[0]
-	if e.Location != "Bull Shoals, AR" {
-		t.Errorf("location = %q, want Bull Shoals, AR", e.Location)
-	}
-	if !e.HasOwnLocation {
-		t.Error("promoted location should count as the entry's own")
-	}
-	if e.Body != "Slept... not bad I think? So that's kinda cool." {
-		t.Errorf("body = %q", e.Body)
-	}
-	if len(e.Flags) != 0 {
-		t.Errorf("flags = %v, want none", e.Flags)
-	}
-}
-
-// A promoted pre-header location must carry down to later entries that have
-// none of their own.
-func TestPlanMigrationPreHeaderLocationCarriesDown(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "2025", "2025-06-28.txt"),
-		"Location: Bull Shoals, AR\n\n## Saturday 06/28/2025 07:45 AM CDT\n\nFirst\n\n## Saturday 06/28/2025 11:13 AM CDT\n\nSecond\n")
-
-	plan, err := PlanMigration(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.Total != 2 {
-		t.Fatalf("plan total = %d, want 2", plan.Total)
-	}
-	g := plan.Groups[0]
-	if g.Entries[0].Location != "Bull Shoals, AR" || g.Entries[1].Location != "Bull Shoals, AR" {
-		t.Errorf("locations = %q, %q; want both Bull Shoals, AR", g.Entries[0].Location, g.Entries[1].Location)
-	}
-	if g.Entries[1].LocationSource != "carried" {
-		t.Errorf("second entry location source = %q, want carried", g.Entries[1].LocationSource)
-	}
-}
-
-// If the first entry has its own location line, it wins and the pre-header
-// line is preserved in the body with a review flag.
-func TestParseLegacyDayFilePreHeaderLocationConflict(t *testing.T) {
-	content := "Location: Elsewhere, KY\n\n## Monday 2024-01-01 9:00 AM CST\nLocation: Chicago, IL\n\nBody text\n"
-	entries, err := ParseLegacyDayFile("f", time.Time{}, content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := entries[0]
-	if e.Location != "Chicago, IL" {
-		t.Errorf("location = %q, want the entry's own Chicago, IL", e.Location)
-	}
-	if !strings.Contains(e.Body, "Location: Elsewhere, KY") {
-		t.Errorf("body %q should retain the pre-header location line", e.Body)
-	}
-	if len(e.Flags) == 0 {
-		t.Error("expected a review flag for the conflicting pre-header location")
-	}
-}
-
 // Lines starting with "## " that are not timestamp headers must pass through
 // as body text, not abort the migration.
-func TestParseLegacyDayFilePassesThroughNonHeaderLines(t *testing.T) {
-	day := time.Time{}
+func TestSplitLegacyEntriesPassesThroughNonHeaderLines(t *testing.T) {
 	content := `
 ## Monday 2024-01-01 9:00 AM CST
-Location: Chicago, IL
-
 Intro text
 
 ## A plain markdown heading
@@ -223,57 +133,43 @@ More text
 
 This looks like a header but the date is bogus.
 `
-	entries, err := ParseLegacyDayFile("f", day, content)
+	entries, err := SplitLegacyEntries(time.Time{}, content)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("got %d entries, want 1", len(entries))
-	}
-	e := entries[0]
-	if e.HeaderTime.Format("2006-01-02 3:04 PM") != "2024-01-01 9:00 AM" {
-		t.Errorf("header time = %q", e.HeaderTime)
 	}
 	want := "Intro text\n\n## A plain markdown heading\n\nMore text\n\n## Monday 2024-13-45 9:00 AM CST\n\nThis looks like a header but the date is bogus."
-	if e.Body != want {
-		t.Errorf("body = %q, want %q", e.Body, want)
-	}
-	if e.Location != "Chicago, IL" {
-		t.Errorf("location = %q", e.Location)
+	if entries[0].Body != want {
+		t.Errorf("body = %q, want %q", entries[0].Body, want)
 	}
 }
 
-// A file whose only "## " lines are not headers has no entry boundaries and
-// takes the headerless path.
-func TestParseLegacyDayFileOnlyNonHeaderLines(t *testing.T) {
+// A file whose only "## " lines are not headers has no timestamp headers and
+// is moved as-is.
+func TestSplitLegacyEntriesOnlyNonHeaderLines(t *testing.T) {
 	day := time.Date(2023, 3, 11, 0, 0, 0, 0, time.Local)
 	content := "## Some heading\n\nJust some text\n"
-	entries, err := ParseLegacyDayFile("f", day, content)
+	entries, err := SplitLegacyEntries(day, content)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("got %d entries, want 1", len(entries))
+	if len(entries) != 1 || !entries[0].Raw {
+		t.Fatalf("entries = %+v, want one raw entry", entries)
+	}
+	if entries[0].Body != content {
+		t.Errorf("raw body = %q, want the file content as-is", entries[0].Body)
 	}
 	if entries[0].HeaderTime.Format("2006-01-02 3:04 PM") != "2023-03-11 12:00 PM" {
-		t.Errorf("headerless timestamp = %q, want noon", entries[0].HeaderTime)
-	}
-	if !strings.Contains(entries[0].Body, "## Some heading") {
-		t.Errorf("body %q should retain the non-header line", entries[0].Body)
+		t.Errorf("raw timestamp = %q, want noon local", entries[0].HeaderTime)
 	}
 }
 
-func TestParseLegacyDayFileEmpty(t *testing.T) {
-	entries, err := ParseLegacyDayFile("f", time.Time{}, "\n \n")
-	if err != nil || entries != nil {
-		t.Errorf("ParseLegacyDayFile() = %v, %v; want nil, nil for empty file", entries, err)
-	}
-}
-
-func TestParseLegacyDayFileHeaderless(t *testing.T) {
+func TestSplitLegacyEntriesHeaderless(t *testing.T) {
 	day := time.Date(2023, 3, 11, 0, 0, 0, 0, time.Local)
-	content := "Location: Somewhere, CO\n\nText on a line\n\nMore text\n\nLater...\n\nNew entry\n"
-	entries, err := ParseLegacyDayFile("2023/2023-03-11.txt", day, content)
+	content := "Location: Somewhere, CO\n\nText on a line\n\nLater...\n\nNew entry\n"
+	entries, err := SplitLegacyEntries(day, content)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,46 +177,37 @@ func TestParseLegacyDayFileHeaderless(t *testing.T) {
 		t.Fatalf("got %d entries, want 1 (whole file)", len(entries))
 	}
 	e := entries[0]
+	if !e.Raw {
+		t.Error("headerless file should be marked Raw")
+	}
+	if e.Body != content {
+		t.Errorf("raw body = %q, want file content byte-for-byte", e.Body)
+	}
 	want := time.Date(2023, 3, 11, 12, 0, 0, 0, time.Local)
 	if !e.HeaderTime.Equal(want) {
-		t.Errorf("headerless timestamp = %v, want noon local %v", e.HeaderTime, want)
-	}
-	if e.Location != "Somewhere, CO" {
-		t.Errorf("location = %q, want Somewhere, CO", e.Location)
-	}
-	if e.Body != "Text on a line\n\nMore text\n\nLater...\n\nNew entry" {
-		t.Errorf("body = %q", e.Body)
+		t.Errorf("timestamp = %v, want noon local %v", e.HeaderTime, want)
 	}
 }
 
-func TestParseLegacyDayFileHeaderlessMultipleLocations(t *testing.T) {
-	day := time.Date(2023, 3, 11, 0, 0, 0, 0, time.Local)
-	content := "Location: First place\n\nEntry one stuff\n\nLocation: Second place\n\nEntry two stuff\n"
-	entries, err := ParseLegacyDayFile("f", day, content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := entries[0]
-	if e.Location != "First place" {
-		t.Errorf("location = %q, want First place", e.Location)
-	}
-	// The unattributable later location line must stay in the body, never dropped.
-	if !strings.Contains(e.Body, "Location: Second place") {
-		t.Errorf("body %q should retain the second location line", e.Body)
-	}
-	if len(e.Flags) == 0 {
-		t.Error("expected a review flag for multiple location lines")
+func TestSplitLegacyEntriesEmpty(t *testing.T) {
+	entries, err := SplitLegacyEntries(time.Time{}, "\n \n")
+	if err != nil || entries != nil {
+		t.Errorf("SplitLegacyEntries() = %v, %v; want nil, nil for empty file", entries, err)
 	}
 }
 
-func TestParseLegacyDayFileHeaderlessNoLocation(t *testing.T) {
-	day := time.Date(2023, 3, 11, 0, 0, 0, 0, time.Local)
-	entries, err := ParseLegacyDayFile("f", day, "Just some text\n")
-	if err != nil {
-		t.Fatal(err)
+func TestBuildEntryContent(t *testing.T) {
+	tz := time.FixedZone("CST", -6*60*60)
+	ts := time.Date(2024, 1, 1, 9, 19, 0, 0, tz)
+	got := buildEntryContent(legacyEntry{HeaderTime: ts, Body: "Location: Chicago, IL\n\nBody text"})
+	want := "## Monday 2024-01-01 9:19 AM CST\nLocation: Chicago, IL\n\nBody text\n"
+	if got != want {
+		t.Errorf("buildEntryContent() = %q, want %q", got, want)
 	}
-	if entries[0].Location != "" || entries[0].HasOwnLocation {
-		t.Errorf("location = %q own=%v, want empty", entries[0].Location, entries[0].HasOwnLocation)
+
+	raw := "Whatever the file contained\n\nas-is.\n"
+	if buildEntryContent(legacyEntry{Raw: true, Body: raw}) != raw {
+		t.Error("raw entries must be moved as-is")
 	}
 }
 
@@ -351,17 +238,56 @@ func TestPlanMigrationFullRun(t *testing.T) {
 	if g.Entries[0].Content != want1 {
 		t.Errorf("content[0] = %q, want %q", g.Entries[0].Content, want1)
 	}
-	want2 := "## Monday 2024-01-01 11:13 AM CST\nLocation: Chicago, IL\n\nSecond entry body, location carried over.\n"
+	// The second entry gets no invented location.
+	want2 := "## Monday 2024-01-01 11:13 AM CST\nSecond entry body.\n"
 	if g.Entries[1].Content != want2 {
 		t.Errorf("content[1] = %q, want %q", g.Entries[1].Content, want2)
-	}
-	if g.Entries[1].LocationSource != "carried" {
-		t.Errorf("location source = %q, want carried", g.Entries[1].LocationSource)
 	}
 
 	// Plan must not write anything.
 	if _, err := os.Stat(wantDest1); !os.IsNotExist(err) {
 		t.Error("planning created destination files; dry run must write nothing")
+	}
+}
+
+func TestPlanMigrationHeaderlessRaw(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "2023", "2023-03-11.txt")
+	content := "Location: Somewhere, CO\n\nText on a line\n\nLater...\n\nNew entry\n"
+	writeFile(t, src, content)
+
+	plan, err := PlanMigration(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Total != 1 || len(plan.Groups[0].Entries) != 1 {
+		t.Fatalf("plan = %+v, want 1 entry", plan)
+	}
+	e := plan.Groups[0].Entries[0]
+	if !e.Raw {
+		t.Error("headerless file should be planned as raw")
+	}
+	noon := time.Date(2023, 3, 11, 12, 0, 0, 0, time.Local)
+	wantDest := filepath.Join(root, "2023", "03", "11", fmtEpoch(noon)+".md")
+	if e.DestPath != wantDest {
+		t.Errorf("dest = %q, want %q", e.DestPath, wantDest)
+	}
+	if e.Content != content {
+		t.Errorf("content = %q, want file content byte-for-byte", e.Content)
+	}
+
+	if err := ApplyMigration(plan, nil); err != nil {
+		t.Fatal(err)
+	}
+	dat, err := os.ReadFile(wantDest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(dat) != content {
+		t.Error("migrated raw file does not match source bytes")
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Error("source not deleted")
 	}
 }
 
@@ -408,24 +334,6 @@ func TestPlanMigrationRejectsDuplicateDestination(t *testing.T) {
 		"## Monday 2024-01-01 9:00 AM CST\n\nA\n\n## Monday 2024-01-01 9:00 AM CST\n\nB\n")
 	if _, err := PlanMigration(root); err == nil || !strings.Contains(err.Error(), "same destination") {
 		t.Fatalf("err = %v, want duplicate destination error", err)
-	}
-}
-
-func TestPlanMigrationFailsEntirelyOnMalformedFile(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "2024", "2024-01-01.txt"), twoEntryDay)
-	writeFile(t, filepath.Join(root, "2024", "2024-01-02.txt"), "loose text\n\n## Monday 2024-01-02 9:00 AM CST\n\nbody\n")
-
-	if _, err := PlanMigration(root); err == nil {
-		t.Fatal("expected error for malformed file")
-	}
-	// The good file must not have been touched.
-	if _, err := os.Stat(filepath.Join(root, "2024", "2024-01-01.txt")); err != nil {
-		t.Errorf("source vanished during failed plan: %v", err)
-	}
-	dayDir := filepath.Join(root, "2024", "01")
-	if _, err := os.Stat(dayDir); !os.IsNotExist(err) {
-		t.Error("failed plan must not create destination directories")
 	}
 }
 
@@ -489,16 +397,6 @@ func TestApplyMigrationCompletesAfterInterruption(t *testing.T) {
 	}
 }
 
-func TestBuildEntryFile(t *testing.T) {
-	tz := time.FixedZone("CST", -6*60*60)
-	ts := time.Date(2024, 1, 1, 9, 19, 0, 0, tz)
-	got := BuildEntryFile(ts, "Chicago, IL", "Body text")
-	want := "## Monday 2024-01-01 9:19 AM CST\nLocation: Chicago, IL\n\nBody text\n"
-	if got != want {
-		t.Errorf("BuildEntryFile() = %q, want %q", got, want)
-	}
-}
-
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
@@ -521,41 +419,4 @@ func mustParseHeader(t *testing.T, header string) time.Time {
 		t.Fatal(err)
 	}
 	return ts
-}
-
-// The earliest files use slash dates and sometimes a zero-padded hour.
-func TestParseLegacyDayFileSlashDateHeaders(t *testing.T) {
-	content := "\n## Saturday 06/28/2025 07:45 AM CDT\n\nLocation: Bull Shoals, AR\nSlept... not bad I think? So that's kinda cool.\n"
-	entries, err := ParseLegacyDayFile("2025/2025-06-28.txt", time.Time{}, content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("got %d entries, want 1", len(entries))
-	}
-	e := entries[0]
-	if e.HeaderTime.Format("2006-01-02 3:04 PM") != "2025-06-28 7:45 AM" {
-		t.Errorf("header time = %q, want 2025-06-28 7:45 AM", e.HeaderTime)
-	}
-	if e.Location != "Bull Shoals, AR" {
-		t.Errorf("location = %q, want Bull Shoals, AR", e.Location)
-	}
-	if e.Body != "Slept... not bad I think? So that's kinda cool." {
-		t.Errorf("body = %q", e.Body)
-	}
-}
-
-// Mixed header formats within one file must all parse.
-func TestParseLegacyDayFileMixedHeaderFormats(t *testing.T) {
-	content := "\n## Saturday 06/28/2025 7:45 AM CDT\n\nFirst\n\n## Saturday 2025-06-28 11:13 AM CDT\n\nSecond\n"
-	entries, err := ParseLegacyDayFile("f", time.Time{}, content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("got %d entries, want 2", len(entries))
-	}
-	if entries[0].HeaderTime.Format("2006-01-02") != "2025-06-28" || entries[1].HeaderTime.Format("2006-01-02") != "2025-06-28" {
-		t.Errorf("header times = %q, %q", entries[0].HeaderTime, entries[1].HeaderTime)
-	}
 }

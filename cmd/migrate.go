@@ -20,12 +20,11 @@ func (c *MigrateCmd) Run(ctx *Context) error {
 	for _, g := range plan.Groups {
 		fmt.Printf("%s: %d entr%s\n", g.Source, len(g.Entries), plural(len(g.Entries)))
 		for _, e := range g.Entries {
-			flags := ""
-			for _, f := range e.Flags {
-				flags += fmt.Sprintf("  [%s]", f)
+			extra := ""
+			if e.Raw {
+				extra = " (moved as-is)"
 			}
-			fmt.Printf("  %s -> %s (location: %s)%s\n",
-				e.HeaderTime.Format("3:04 PM"), relPath(e.DestPath), e.LocationSource, flags)
+			fmt.Printf("  %s -> %s%s\n", e.HeaderTime.Format("3:04 PM"), relPath(e.DestPath), extra)
 		}
 	}
 	for _, s := range plan.Skipped {

@@ -104,12 +104,13 @@ converts these to the current one-file-per-entry layout.
 **Safety model.** Migration is two-phase and dry-run by default. `bt migrate`
 always scans and validates *everything* first and prints a report without
 writing; `bt migrate --apply` performs the writes only if the entire plan
-validated. Any malformed file aborts the whole run with a `file:line` error
-before anything is written. Entries are written atomically (temp file +
-rename), re-read to verify byte-exact content, and only then is the source
-file deleted — so an interrupted run leaves sources intact and can be re-run
-safely: destinations that already exist with identical content are skipped,
-while a conflicting destination aborts.
+validated. The only abort conditions are operational: unreadable files,
+duplicate destinations (two entries mapping to the same `<epoch>.md`), and
+destinations that already exist with different content. Entries are written
+atomically (temp file + rename), re-read to verify byte-exact content, and
+only then is the source file deleted — so an interrupted run leaves sources
+intact and can be re-run safely: destinations that already exist with
+identical content are skipped.
 
 **Discovery.** `internal.DiscoverLegacyFiles` walks `<data-dir>/YYYY/` for
 files named `YYYY-MM-DD.txt` (year dir must match the filename date);
@@ -117,35 +118,31 @@ unrecognized files in year dirs are reported and skipped. The pattern is
 disjoint from the current `YYYY/MM/DD/*.md` layout, so migrated files are
 never re-processed.
 
-**Headered files** (`internal.ParseLegacyDayFile`). Only `## ` lines whose
-remainder parses with one of `headerLayouts` open a new entry — the current
-`Monday 2006-01-02 3:04 PM MST`, the early slash-date
-`Monday 01/02/2006 3:04 PM MST`, and zone-less variants of both (interpreted
-in the local zone) — other lines starting with `## ` (e.g. plain Markdown
-headings) are body text and pass through unchanged. Before
-the first entry header, blank lines and `Location: ` lines are allowed: the
-last pre-header location line becomes the first entry's location (unless the
-entry has its own, which wins and keeps the pre-header line in the body),
-and other pre-header lines are preserved at the top of the first entry's
-body with a review flag; anything else before the first header is malformed
-and aborts. Location carry-down
-reproduces the old semantics: an entry with a `Location: ` line keeps it; an
-entry without one inherits the most recent earlier location in the file.
+**Splitting rules** (`internal.SplitLegacyEntries`). Two deterministic rules
+only — nothing is inferred and no data is synthesized:
 
-**Headerless files.** Old files sometimes have no entry headers at all;
-entry boundaries there are implied only by prose and cannot be parsed, so the
-whole file becomes a single entry stamped at **noon local time on the file's
-date**. (A file whose only `## ` lines are non-header text takes this path
-too.) The first `Location: ` line is promoted to the structured location
-line; any later ones are unattributable, so they remain in the body verbatim
-and the entry is flagged `review: multiple location lines`.
+1. **Timestamp headers exist** (any format in `headerLayouts`: the current
+   `Monday 2006-01-02 3:04 PM MST`, the early slash-date
+   `Monday 01/02/2006 3:04 PM MST`, and zone-less variants of both): the file
+   is split at those lines, and each header is normalized to the current
+   format (`## Sunday 2026-09-20 9:46 AM PDT`). The content below each header
+   is kept exactly as it appeared — `Location:` lines stay where they are and
+   are never carried down to entries that lack them. Lines starting with
+   `## ` that are not timestamp headers are body text and pass through
+   unchanged, and content before the first header is kept at the top of the
+   first entry's body.
+2. **No timestamp headers**: the file cannot be split safely, so it is moved
+   as-is (byte-for-byte, no header prepended) to
+   `<data-dir>/YYYY/MM/DD/<epoch>.md`, where the epoch is **noon local time
+   on the date from the filename**. `bt view` orders these by their filename
+   epoch.
 
-**Timestamp caveat.** Header epochs are derived with `time.Parse` using
-`timestampLayout`. A header whose zone abbreviation is not known to the local
-zone is parsed into a fabricated zero-offset zone. The parsed wall clock
-always equals the header text, so day placement and within-day ordering stay
-correct; the header remains the authoritative display timestamp. Epochs for
-headerless entries use the true local zone.
+**Timestamp caveat.** Header epochs are derived with `time.Parse`. A header
+whose zone abbreviation is not known to the local zone is parsed into a
+fabricated zero-offset zone. The parsed wall clock always equals the header
+text, so day placement and within-day ordering stay correct; the header
+remains the authoritative display timestamp. Zone-less headers and moved
+files use the true local zone.
 
 **Empty files** (whitespace only) are skipped; there is nothing to migrate.
 
