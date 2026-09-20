@@ -117,18 +117,21 @@ unrecognized files in year dirs are reported and skipped. The pattern is
 disjoint from the current `YYYY/MM/DD/*.md` layout, so migrated files are
 never re-processed.
 
-**Headered files** (`internal.ParseLegacyDayFile`). Entries are split at
-`## ` lines; every `## ` line must parse with `timestampLayout` and no
-non-blank content may precede the first header. Location carry-down
-reproduces the old semantics: an entry with a `Location: ` line keeps it; an
-entry without one inherits the most recent earlier location in the file.
+**Headered files** (`internal.ParseLegacyDayFile`). Only `## ` lines whose
+remainder parses with `timestampLayout` open a new entry; other lines
+starting with `## ` (e.g. plain Markdown headings) are body text and pass
+through unchanged. No non-blank content may precede the first entry header.
+Location carry-down reproduces the old semantics: an entry with a
+`Location: ` line keeps it; an entry without one inherits the most recent
+earlier location in the file.
 
-**Headerless files.** Old files sometimes have no headers at all; entry
-boundaries there are implied only by prose and cannot be parsed, so the whole
-file becomes a single entry stamped at **noon local time on the file's date**.
-The first `Location: ` line is promoted to the structured location line;
-any later ones are unattributable, so they remain in the body verbatim and
-the entry is flagged `review: multiple location lines`.
+**Headerless files.** Old files sometimes have no entry headers at all;
+entry boundaries there are implied only by prose and cannot be parsed, so the
+whole file becomes a single entry stamped at **noon local time on the file's
+date**. (A file whose only `## ` lines are non-header text takes this path
+too.) The first `Location: ` line is promoted to the structured location
+line; any later ones are unattributable, so they remain in the body verbatim
+and the entry is flagged `review: multiple location lines`.
 
 **Timestamp caveat.** Header epochs are derived with `time.Parse` using
 `timestampLayout`. A header whose zone abbreviation is not known to the local

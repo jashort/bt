@@ -83,9 +83,8 @@ func TestParseLegacyDayFileMalformed(t *testing.T) {
 		content string
 		wantErr string
 	}{
-		{"bad header format", "\n## Someday\n\nbody\n", "unparsable entry header"},
-		{"bad header date", "\n## Monday 2024-13-45 9:00 AM CST\n\nbody\n", "unparsable entry header"},
 		{"content before first header", "loose text\n\n## Monday 2024-01-01 9:00 AM CST\n\nbody\n", "content before first entry header"},
+		{"non-header hash line before first header", "## Just a heading\n## Monday 2024-01-01 9:00 AM CST\n\nbody\n", "content before first entry header"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,6 +96,64 @@ func TestParseLegacyDayFileMalformed(t *testing.T) {
 				t.Errorf("error %q should name the file and line", err)
 			}
 		})
+	}
+}
+
+// Lines starting with "## " that are not timestamp headers must pass through
+// as body text, not abort the migration.
+func TestParseLegacyDayFilePassesThroughNonHeaderLines(t *testing.T) {
+	day := time.Time{}
+	content := `
+## Monday 2024-01-01 9:00 AM CST
+Location: Chicago, IL
+
+Intro text
+
+## A plain markdown heading
+
+More text
+
+## Monday 2024-13-45 9:00 AM CST
+
+This looks like a header but the date is bogus.
+`
+	entries, err := ParseLegacyDayFile("f", day, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.HeaderTime.Format("2006-01-02 3:04 PM") != "2024-01-01 9:00 AM" {
+		t.Errorf("header time = %q", e.HeaderTime)
+	}
+	want := "Intro text\n\n## A plain markdown heading\n\nMore text\n\n## Monday 2024-13-45 9:00 AM CST\n\nThis looks like a header but the date is bogus."
+	if e.Body != want {
+		t.Errorf("body = %q, want %q", e.Body, want)
+	}
+	if e.Location != "Chicago, IL" {
+		t.Errorf("location = %q", e.Location)
+	}
+}
+
+// A file whose only "## " lines are not headers has no entry boundaries and
+// takes the headerless path.
+func TestParseLegacyDayFileOnlyNonHeaderLines(t *testing.T) {
+	day := time.Date(2023, 3, 11, 0, 0, 0, 0, time.Local)
+	content := "## Some heading\n\nJust some text\n"
+	entries, err := ParseLegacyDayFile("f", day, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].HeaderTime.Format("2006-01-02 3:04 PM") != "2023-03-11 12:00 PM" {
+		t.Errorf("headerless timestamp = %q, want noon", entries[0].HeaderTime)
+	}
+	if !strings.Contains(entries[0].Body, "## Some heading") {
+		t.Errorf("body %q should retain the non-header line", entries[0].Body)
 	}
 }
 
@@ -251,7 +308,7 @@ func TestPlanMigrationRejectsDuplicateDestination(t *testing.T) {
 func TestPlanMigrationFailsEntirelyOnMalformedFile(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "2024", "2024-01-01.txt"), twoEntryDay)
-	writeFile(t, filepath.Join(root, "2024", "2024-01-02.txt"), "\n## Broken header\n\nbody\n")
+	writeFile(t, filepath.Join(root, "2024", "2024-01-02.txt"), "loose text\n\n## Monday 2024-01-02 9:00 AM CST\n\nbody\n")
 
 	if _, err := PlanMigration(root); err == nil {
 		t.Fatal("expected error for malformed file")

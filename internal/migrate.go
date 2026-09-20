@@ -107,16 +107,17 @@ func DiscoverLegacyFiles(dataDir string) (files []legacyFile, skipped []string, 
 
 // ParseLegacyDayFile splits a legacy day file into entries.
 //
-// Headered files (one or more "## <timestamp>" lines) are split at those
-// lines. Every "## " line must parse with timestampLayout, and there must be
-// no non-blank content before the first header, or an error naming the file
-// and line is returned. Each entry's location is the last "Location: " line
-// in its segment; any earlier ones stay in the body.
+// Only "## <timestamp>" lines that parse with timestampLayout open a new
+// entry; other lines starting with "## " are body text and pass through
+// unchanged. There must be no non-blank content before the first entry
+// header, or an error naming the file and line is returned. Each entry's
+// location is the last "Location: " line in its segment; any earlier ones
+// stay in the body.
 //
-// Headerless files contain no machine-readable entry boundaries, so the whole
-// file is treated as a single entry stamped at noon on the file's date. The
-// first "Location: " line becomes the entry's location; later ones stay in
-// the body and produce a review flag.
+// Files with no entry headers at all contain no machine-readable entry
+// boundaries, so the whole file is treated as a single entry stamped at noon
+// on the file's date. The first "Location: " line becomes the entry's
+// location; later ones stay in the body and produce a review flag.
 func ParseLegacyDayFile(path string, day time.Time, content string) ([]legacyEntry, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, nil // Empty file: nothing to migrate
@@ -125,7 +126,7 @@ func ParseLegacyDayFile(path string, day time.Time, content string) ([]legacyEnt
 
 	headerIdx := []int{}
 	for i, line := range lines {
-		if strings.HasPrefix(line, "## ") {
+		if _, err := parseHeaderLine(line); err == nil {
 			headerIdx = append(headerIdx, i)
 		}
 	}
@@ -148,16 +149,21 @@ func ParseLegacyDayFile(path string, day time.Time, content string) ([]legacyEnt
 		if h+1 < len(headerIdx) {
 			end = headerIdx[h+1]
 		}
-		header := strings.TrimSpace(strings.TrimPrefix(lines[start], "## "))
-		ts, err := time.Parse(timestampLayout, header)
-		if err != nil {
-			return nil, fmt.Errorf("%s:%d: unparsable entry header %q: %w", path, start+1, header, err)
-		}
 		entry := extractEntryBody(lines[start+1 : end])
-		entry.HeaderTime = ts
+		entry.HeaderTime, _ = parseHeaderLine(lines[start])
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+// parseHeaderLine returns the timestamp of a "## <timestamp>" entry header
+// line, or an error if the line is not a header (including "## " lines that
+// are ordinary body text).
+func parseHeaderLine(line string) (time.Time, error) {
+	if !strings.HasPrefix(line, "## ") {
+		return time.Time{}, errors.New("not an entry header")
+	}
+	return time.Parse(timestampLayout, strings.TrimSpace(strings.TrimPrefix(line, "## ")))
 }
 
 // parseHeaderlessEntry treats the entire content as one entry stamped at noon
