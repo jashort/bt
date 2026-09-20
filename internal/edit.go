@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"log"
@@ -18,36 +17,6 @@ const timestampLayout = "Monday 2006-01-02 3:04 PM MST"
 
 func TimestampHeader(timestamp time.Time) string {
 	return fmt.Sprintf("## %s\n", timestamp.Format(timestampLayout))
-}
-
-func ShouldAddLocationToFile(filename string, location string) (bool, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return false, err
-	}
-	defer func(file *os.File) {
-		err := file.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}(file)
-	scanner := bufio.NewScanner(file)
-	return ShouldAddLocation(scanner, location)
-}
-
-func ShouldAddLocation(scanner *bufio.Scanner, location string) (bool, error) {
-	var lastLocation string
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(strings.TrimSpace(line), "Location: ") {
-			lastLocation = strings.TrimSpace(line)
-		}
-	}
-	lastLocation = strings.TrimPrefix(lastLocation, "Location: ")
-	if strings.EqualFold(lastLocation, location) {
-		return false, nil
-	}
-	return true, nil
 }
 
 // RunEditor creates a temporary file containing header and runs nvim to edit it.

@@ -28,10 +28,10 @@ Flow of `bt add` (the default command when run with no subcommand):
    below the header (trimmed). An empty entry aborts.
 5. The destination file is computed by `internal.DestinationFile`, created if
    needed, and the entry is appended (see Storage layout below).
-6. A `Location: <location>` line is added only when the location differs from
-   the last location already present in that day's file
-   (`internal.ShouldAddLocation*`), so repeated entries in the same place do
-   not repeat the location.
+6. A `Location: <location>` line is written right after the header. Since each
+   entry is a self-contained file, the line is always present (possibly empty
+   when no location is given); no deduplication against previous entries is
+   performed.
 
 `bt view` collects all entry files for the resolved day via
 `internal.EntryFiles`, sorts them by the timestamp parsed from each file's
@@ -60,33 +60,27 @@ at `~/data/Blog/2026/09/20/1789921166.md`.
   timestamp is the one in the file's header line, which the user may have
   adjusted while editing. `EntryFiles` prefers the header timestamp for
   ordering and falls back to the filename epoch.
-- Multiple entries on the same day are separate files, all appended into the
-  same day's file set and printed one after another by `bt view`.
+- Each file holds exactly one entry; a day's entries are separate files, all
+  printed one after another by `bt view`.
 
 ## File format
 
-Each `.md` entry file is plain Markdown:
+Each `.md` entry file contains a single entry and is plain Markdown:
 
 ```markdown
-
 ## Sunday 2026-09-20 9:19 AM PDT
 Location: Somewhere
 
 Things happened...
-
-## Sunday 2026-09-20 11:13 AM PDT
-Other things happened...
 ```
 
 - Header line: `## <weekday> <YYYY-MM-DD> <H:MM AM/PM> <TZ>`, formatted with
   `timestampLayout = "Monday 2006-01-02 3:04 PM MST"` (`internal/edit.go:17`).
-- The optional `Location: ...` line immediately follows a header and appears
-  only when it differs from the last location in the file (case-insensitive
-  comparison).
-- The header (and location) for each entry is repeated per entry; `bt add`
-  appends `\n## ...` blocks to the same file as the day fills up.
-- The temp file handed to the editor contains just the header; everything the
-  user adds below it becomes the entry body.
+- The `Location: ...` line immediately follows the header and is always
+  present, even when empty (`Location: ` with no value).
+- Everything after the blank line following the location is the entry body;
+  the temp file handed to the editor contains just the header, and the
+  location line is prepended to the saved body.
 
 ## Configuration
 

@@ -1,15 +1,16 @@
 # bt
 
-Helper program to save blog entries with a consistent format. Example
+Helper program to save blog entries with a consistent format. Each entry is
+saved to its own file:
 
 ```markdown
-## Saturday 06/28/2025 10:45 AM CDT
+## Saturday 2025-06-28 10:45 AM CDT
 Location: Somewhere
 Things happened...
 
-## Saturday 06/28/2025 11:13 AM CDT
-Other things happened... But location is only added if it's different than the last
-entry in the file.
+## Saturday 2025-06-28 11:13 AM CDT
+Location: Somewhere
+Other things happened...
 ```
 
 Files are stored in `~/data/Blog/YYYY/MM/DD/<seconds since unix epoch>.md` (configurable)

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bt/internal"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -37,18 +36,8 @@ func (l *AddCmd) Run(ctx *Context) error {
 		return err
 	}
 
-	output := "\n" + internal.TimestampHeader(timestamp)
-	if _, err := os.Stat(targetFile); errors.Is(err, os.ErrNotExist) {
-		output += fmt.Sprintf("Location: %s\n\n", l.Location)
-	} else {
-		shouldAdd, err := internal.ShouldAddLocationToFile(targetFile, l.Location)
-		if err != nil {
-			return err
-		}
-		if shouldAdd {
-			output += fmt.Sprintf("Location: %s\n\n", l.Location)
-		}
-	}
+	output := internal.TimestampHeader(timestamp)
+	output += fmt.Sprintf("Location: %s\n\n", l.Location)
 	output += strings.TrimSpace(entry) + "\n"
 
 	f, err := os.OpenFile(targetFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
