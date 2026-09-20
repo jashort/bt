@@ -32,6 +32,11 @@ bt view --at "yesterday"
 
 # Edit the entry for a specific date
 bt edit --at "2023-03-11"
+
+# Migrate old per-day files (YYYY/YYYY-MM-DD.txt) to per-entry files.
+# Dry run by default; --apply writes and deletes verified sources.
+bt migrate            # report only
+bt migrate --apply    # perform the migration
 ```
 
 ## Configuration

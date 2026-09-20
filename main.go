@@ -11,11 +11,12 @@ import (
 )
 
 var CLI struct {
-	DataDir string      `help:"Data directory for the application" default:"~/data/Blog" type:"path"`
-	Debug   bool        `help:"Print debugging info to stderr"`
-	Add     cmd.AddCmd  `cmd:"" help:"Add entry" default:"withargs"`
-	View    cmd.ViewCmd `cmd:"" help:"View entries"`
-	Edit    cmd.EditCmd `cmd:"" help:"Edit entries"`
+	DataDir string         `help:"Data directory for the application" default:"~/data/Blog" type:"path"`
+	Debug   bool           `help:"Print debugging info to stderr"`
+	Add     cmd.AddCmd     `cmd:"" help:"Add entry" default:"withargs"`
+	View    cmd.ViewCmd    `cmd:"" help:"View entries"`
+	Edit    cmd.EditCmd    `cmd:"" help:"Edit entries"`
+	Migrate cmd.MigrateCmd `cmd:"" help:"Migrate old per-day files to per-entry files"`
 }
 
 func main() {

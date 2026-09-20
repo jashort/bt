@@ -8,8 +8,8 @@ Markdown file with a consistent header format.
 
 ```
 main.go            CLI definition (kong), single-instance lock, config loading
-cmd/               Kong commands: add (default), view, edit
-internal/          Core logic: timestamp parsing, entry files, editor, location
+cmd/               Kong commands: add (default), view, edit, migrate
+internal/          Core logic: timestamp parsing, entry files, editor, location, migration
 data/              Example/sample data tree
 ```
 
@@ -92,6 +92,52 @@ flags:
 location  = "My Town"      # Default location; overridden by --location
 data-dir  = "~/data/Blog"  # Base directory for entries
 ```
+
+## Migration (`bt migrate`)
+
+Earlier versions stored a whole day of entries in one file:
+`<data-dir>/YYYY/YYYY-MM-DD.txt`, where each entry was appended as
+`\n` + header + optional `Location:` line + body, and a `Location:` line was
+only written when it differed from the previous entry's. `bt migrate`
+converts these to the current one-file-per-entry layout.
+
+**Safety model.** Migration is two-phase and dry-run by default. `bt migrate`
+always scans and validates *everything* first and prints a report without
+writing; `bt migrate --apply` performs the writes only if the entire plan
+validated. Any malformed file aborts the whole run with a `file:line` error
+before anything is written. Entries are written atomically (temp file +
+rename), re-read to verify byte-exact content, and only then is the source
+file deleted — so an interrupted run leaves sources intact and can be re-run
+safely: destinations that already exist with identical content are skipped,
+while a conflicting destination aborts.
+
+**Discovery.** `internal.DiscoverLegacyFiles` walks `<data-dir>/YYYY/` for
+files named `YYYY-MM-DD.txt` (year dir must match the filename date);
+unrecognized files in year dirs are reported and skipped. The pattern is
+disjoint from the current `YYYY/MM/DD/*.md` layout, so migrated files are
+never re-processed.
+
+**Headered files** (`internal.ParseLegacyDayFile`). Entries are split at
+`## ` lines; every `## ` line must parse with `timestampLayout` and no
+non-blank content may precede the first header. Location carry-down
+reproduces the old semantics: an entry with a `Location: ` line keeps it; an
+entry without one inherits the most recent earlier location in the file.
+
+**Headerless files.** Old files sometimes have no headers at all; entry
+boundaries there are implied only by prose and cannot be parsed, so the whole
+file becomes a single entry stamped at **noon local time on the file's date**.
+The first `Location: ` line is promoted to the structured location line;
+any later ones are unattributable, so they remain in the body verbatim and
+the entry is flagged `review: multiple location lines`.
+
+**Timestamp caveat.** Header epochs are derived with `time.Parse` using
+`timestampLayout`. A header whose zone abbreviation is not known to the local
+zone is parsed into a fabricated zero-offset zone. The parsed wall clock
+always equals the header text, so day placement and within-day ordering stay
+correct; the header remains the authoritative display timestamp. Epochs for
+headerless entries use the true local zone.
+
+**Empty files** (whitespace only) are skipped; there is nothing to migrate.
 
 ## Editor integration
 
