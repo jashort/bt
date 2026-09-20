@@ -210,13 +210,19 @@ func applyPreHeader(pre []string, entries []legacyEntry) {
 	}
 }
 
-// headerLayouts lists the header formats historical versions have written:
-// the current "Monday 2006-01-02 3:04 PM MST" and the early slash-date
-// "Monday 01/02/2006 3:04 PM MST" (which also appears with a zero-padded
-// hour, e.g. "07:45"; Go's parser accepts that under the "3" layout).
-var headerLayouts = []string{
-	timestampLayout,
-	"Monday 01/02/2006 3:04 PM MST",
+// headerLayouts lists the header formats historical versions have written.
+// Zone-less variants (entries recorded without a timezone) are interpreted in
+// the local zone so the regenerated header shows a plausible wall clock.
+// Slash-date headers also appear with a zero-padded hour (e.g. "07:45"), which
+// Go's parser accepts under the "3" layout.
+var headerLayouts = []struct {
+	layout  string
+	inLocal bool // layout has no zone: parse the wall clock in time.Local
+}{
+	{timestampLayout, false},
+	{"Monday 01/02/2006 3:04 PM MST", false},
+	{"Monday 2006-01-02 3:04 PM", true},
+	{"Monday 01/02/2006 3:04 PM", true},
 }
 
 // parseHeaderLine returns the timestamp of a "## <timestamp>" entry header
@@ -227,8 +233,15 @@ func parseHeaderLine(line string) (time.Time, error) {
 		return time.Time{}, errors.New("not an entry header")
 	}
 	text := strings.TrimSpace(strings.TrimPrefix(line, "## "))
-	for _, layout := range headerLayouts {
-		if ts, err := time.Parse(layout, text); err == nil {
+	for _, h := range headerLayouts {
+		var ts time.Time
+		var err error
+		if h.inLocal {
+			ts, err = time.ParseInLocation(h.layout, text, time.Local)
+		} else {
+			ts, err = time.Parse(h.layout, text)
+		}
+		if err == nil {
 			return ts, nil
 		}
 	}

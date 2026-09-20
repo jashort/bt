@@ -99,7 +99,45 @@ func TestParseLegacyDayFileMalformed(t *testing.T) {
 	}
 }
 
-// A "Location: " line before the first entry header belongs to that entry.
+// Headers without a timezone must parse too; this is the exact shape of a
+// real failing file (pre-header location + zone-less slash-date header).
+func TestParseLegacyDayFileZonelessHeader(t *testing.T) {
+	content := "Location: Flight DL2014, RDU > MSP\n\n## Tuesday 03/14/2023 01:25 PM\nGot up a touch early today\n"
+	entries, err := ParseLegacyDayFile("2023/2023-03-14.txt", time.Time{}, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.HeaderTime.Format("2006-01-02 3:04 PM") != "2023-03-14 1:25 PM" {
+		t.Errorf("header time = %q, want 2023-03-14 1:25 PM", e.HeaderTime)
+	}
+	if e.HeaderTime.Location() != time.Local {
+		t.Errorf("zone-less header should resolve to the local zone, got %v", e.HeaderTime.Location())
+	}
+	if e.Location != "Flight DL2014, RDU > MSP" {
+		t.Errorf("location = %q", e.Location)
+	}
+	if e.Body != "Got up a touch early today" {
+		t.Errorf("body = %q", e.Body)
+	}
+}
+
+func TestParseLegacyDayFileZonelessISOHeader(t *testing.T) {
+	content := "\n## Tuesday 2023-03-14 1:25 PM\nBody only\n"
+	entries, err := ParseLegacyDayFile("f", time.Time{}, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries[0].HeaderTime.Format("2006-01-02 3:04 PM") != "2023-03-14 1:25 PM" {
+		t.Errorf("header time = %q", entries[0].HeaderTime)
+	}
+}
+
+// A "## " line before the first entry header that is not a valid header is
+// still malformed.
 func TestParseLegacyDayFilePreHeaderLocation(t *testing.T) {
 	content := "Location: Bull Shoals, AR\n\n## Saturday 06/28/2025 07:45 AM CDT\n\nSlept... not bad I think? So that's kinda cool.\n"
 	entries, err := ParseLegacyDayFile("2025/2025-06-28.txt", time.Time{}, content)
