@@ -121,8 +121,13 @@ never re-processed.
 remainder parses with one of `headerLayouts` open a new entry — the current
 `Monday 2006-01-02 3:04 PM MST` and the early slash-date
 `Monday 01/02/2006 3:04 PM MST` — other lines starting with `## ` (e.g.
-plain Markdown headings) are body text and pass through unchanged. No
-non-blank content may precede the first entry header. Location carry-down
+plain Markdown headings) are body text and pass through unchanged. Before
+the first entry header, blank lines and `Location: ` lines are allowed: the
+last pre-header location line becomes the first entry's location (unless the
+entry has its own, which wins and keeps the pre-header line in the body),
+and other pre-header lines are preserved at the top of the first entry's
+body with a review flag; anything else before the first header is malformed
+and aborts. Location carry-down
 reproduces the old semantics: an entry with a `Location: ` line keeps it; an
 entry without one inherits the most recent earlier location in the file.
 

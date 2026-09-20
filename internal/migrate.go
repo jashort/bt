@@ -109,10 +109,13 @@ func DiscoverLegacyFiles(dataDir string) (files []legacyFile, skipped []string, 
 //
 // Only "## <timestamp>" lines that parse with one of headerLayouts open a
 // new entry; other lines starting with "## " are body text and pass through
-// unchanged. There must be no non-blank content before the first entry
-// header, or an error naming the file and line is returned. Each entry's
-// location is the last "Location: " line in its segment; any earlier ones
-// stay in the body.
+// unchanged. Before the first entry header only blank lines and
+// "Location: " lines are allowed: the last such location line becomes the
+// first entry's location, and any other pre-header lines are preserved at
+// the top of the first entry's body with a review flag. Anything else before
+// the first header is malformed and returns an error naming the file and
+// line. Each entry's location is the last "Location: " line in its segment;
+// any earlier ones stay in the body.
 //
 // Files with no entry headers at all contain no machine-readable entry
 // boundaries, so the whole file is treated as a single entry stamped at noon
@@ -136,11 +139,14 @@ func ParseLegacyDayFile(path string, day time.Time, content string) ([]legacyEnt
 		return []legacyEntry{entry}, nil
 	}
 
-	// Reject non-blank content before the first header.
+	// Before the first header, only blank lines and "Location: " lines are
+	// tolerated; a pre-header location belongs to the first entry.
 	for i, line := range lines[:headerIdx[0]] {
-		if strings.TrimSpace(line) != "" {
-			return nil, fmt.Errorf("%s:%d: content before first entry header", path, i+1)
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, locationPrefix) {
+			continue
 		}
+		return nil, fmt.Errorf("%s:%d: content before first entry header", path, i+1)
 	}
 
 	var entries []legacyEntry
@@ -153,7 +159,55 @@ func ParseLegacyDayFile(path string, day time.Time, content string) ([]legacyEnt
 		entry.HeaderTime, _ = parseHeaderLine(lines[start])
 		entries = append(entries, entry)
 	}
+	applyPreHeader(lines[:headerIdx[0]], entries)
 	return entries, nil
+}
+
+// applyPreHeader folds the pre-header region of a file into the first entry:
+// the last pre-header "Location: " line becomes the first entry's location
+// (unless the entry has its own, which wins), and every other pre-header
+// line is preserved at the top of the first entry's body. Pre-header content
+// other than blank and location lines is rejected by the caller.
+func applyPreHeader(pre []string, entries []legacyEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	lastLocIdx, locCount := -1, 0
+	for i, line := range pre {
+		if t := strings.TrimSpace(line); t != "" && strings.HasPrefix(t, locationPrefix) {
+			lastLocIdx, locCount = i, locCount+1
+		}
+	}
+	if lastLocIdx < 0 {
+		return
+	}
+	first := &entries[0]
+	promoted := strings.TrimSpace(strings.TrimSpace(pre[lastLocIdx])[len(locationPrefix):])
+	keepAll := false
+	if first.HasOwnLocation {
+		// The entry's own location is more specific; keep the pre-header
+		// line visible in the body rather than dropping it.
+		keepAll = true
+		first.Flags = append(first.Flags, "review: pre-header location line kept in body; entry has its own")
+	}
+	var keep []string
+	for i, line := range pre {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || (i == lastLocIdx && !keepAll) {
+			continue
+		}
+		keep = append(keep, trimmed)
+	}
+	if !keepAll {
+		first.Location = promoted
+		first.HasOwnLocation = true
+	}
+	if locCount > 1 {
+		first.Flags = append(first.Flags, "review: multiple location lines before the first entry header; used the last")
+	}
+	if len(keep) > 0 {
+		first.Body = strings.TrimSpace(strings.Join(keep, "\n") + "\n" + first.Body)
+	}
 }
 
 // headerLayouts lists the header formats historical versions have written:

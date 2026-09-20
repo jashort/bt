@@ -99,6 +99,74 @@ func TestParseLegacyDayFileMalformed(t *testing.T) {
 	}
 }
 
+// A "Location: " line before the first entry header belongs to that entry.
+func TestParseLegacyDayFilePreHeaderLocation(t *testing.T) {
+	content := "Location: Bull Shoals, AR\n\n## Saturday 06/28/2025 07:45 AM CDT\n\nSlept... not bad I think? So that's kinda cool.\n"
+	entries, err := ParseLegacyDayFile("2025/2025-06-28.txt", time.Time{}, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.Location != "Bull Shoals, AR" {
+		t.Errorf("location = %q, want Bull Shoals, AR", e.Location)
+	}
+	if !e.HasOwnLocation {
+		t.Error("promoted location should count as the entry's own")
+	}
+	if e.Body != "Slept... not bad I think? So that's kinda cool." {
+		t.Errorf("body = %q", e.Body)
+	}
+	if len(e.Flags) != 0 {
+		t.Errorf("flags = %v, want none", e.Flags)
+	}
+}
+
+// A promoted pre-header location must carry down to later entries that have
+// none of their own.
+func TestPlanMigrationPreHeaderLocationCarriesDown(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "2025", "2025-06-28.txt"),
+		"Location: Bull Shoals, AR\n\n## Saturday 06/28/2025 07:45 AM CDT\n\nFirst\n\n## Saturday 06/28/2025 11:13 AM CDT\n\nSecond\n")
+
+	plan, err := PlanMigration(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Total != 2 {
+		t.Fatalf("plan total = %d, want 2", plan.Total)
+	}
+	g := plan.Groups[0]
+	if g.Entries[0].Location != "Bull Shoals, AR" || g.Entries[1].Location != "Bull Shoals, AR" {
+		t.Errorf("locations = %q, %q; want both Bull Shoals, AR", g.Entries[0].Location, g.Entries[1].Location)
+	}
+	if g.Entries[1].LocationSource != "carried" {
+		t.Errorf("second entry location source = %q, want carried", g.Entries[1].LocationSource)
+	}
+}
+
+// If the first entry has its own location line, it wins and the pre-header
+// line is preserved in the body with a review flag.
+func TestParseLegacyDayFilePreHeaderLocationConflict(t *testing.T) {
+	content := "Location: Elsewhere, KY\n\n## Monday 2024-01-01 9:00 AM CST\nLocation: Chicago, IL\n\nBody text\n"
+	entries, err := ParseLegacyDayFile("f", time.Time{}, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := entries[0]
+	if e.Location != "Chicago, IL" {
+		t.Errorf("location = %q, want the entry's own Chicago, IL", e.Location)
+	}
+	if !strings.Contains(e.Body, "Location: Elsewhere, KY") {
+		t.Errorf("body %q should retain the pre-header location line", e.Body)
+	}
+	if len(e.Flags) == 0 {
+		t.Error("expected a review flag for the conflicting pre-header location")
+	}
+}
+
 // Lines starting with "## " that are not timestamp headers must pass through
 // as body text, not abort the migration.
 func TestParseLegacyDayFilePassesThroughNonHeaderLines(t *testing.T) {
